@@ -1,0 +1,73 @@
+---
+title: "World Cup predictions"
+author: "Nick McCubbin"
+date: "2022-12-11"
+output: html_document
+---
+
+```{r}
+# Load libraries
+library(dplyr)
+library(readr)
+library(caret)
+```
+
+```{r}
+# Load data
+teams <- read_csv("teams.csv", col_names = TRUE, col_types = cols(.default = "c"))
+rankings <- read_csv("rankings.csv", col_names = TRUE, col_types = cols(.default = "c"))
+ratios <- read_csv("ratios.csv", col_names = TRUE, col_types = cols(.default = "c"))
+international_matches <- read_csv("international_matches.csv", col_names = TRUE, col_types = cols(.default = "c"))
+
+rankings <- data.frame(rankings)
+international_matches$home_team_fifa_rank<- as.numeric(international_matches$home_team_fifa_rank)
+international_matches$away_team_fifa_rank <- as.numeric(international_matches$away_team_fifa_rank)
+international_matches$home_team_total_fifa_points <- as.numeric(international_matches$home_team_total_fifa_points)
+international_matches$away_team_total_fifa_points <- as.numeric(international_matches$away_team_total_fifa_points)
+international_matches$home_team_score <- as.numeric(international_matches$home_team_score)
+international_matches$away_team_score <- as.numeric(international_matches$away_team_score)
+```
+
+
+```{r}
+international_matches <- international_matches %>%
+  mutate(rank_difference = home_team_fifa_rank - away_team_fifa_rank,
+         average_rank = (home_team_fifa_rank + away_team_fifa_rank) / 2,
+         point_difference = home_team_total_fifa_points - away_team_total_fifa_points,
+         is_stake = tournament != "Friendly",
+         is_worldcup = grepl("FIFA World Cup", tournament),
+         score_difference = home_team_score - away_team_score,
+         is_won = score_difference > 0)
+```
+
+
+```{r}
+set.seed(42)
+rnd <- runif(nrow(international_matches))
+train <- international_matches[rnd < 0.7,]
+holdout <- international_matches[rnd >= 0.7,]
+
+
+logreg_model <- train(factor(is_won) ~ average_rank + rank_difference + point_difference + is_stake + is_worldcup,
+                      data = train,
+                      method = "glm",
+                      family = "binomial")
+
+
+logreg_predictions <- predict(logreg_model, holdout)
+
+
+
+performance <- confusionMatrix(logreg_predictions,)
+
+
+logreg_predictions <- as.factor(logreg_predictions)
+holdout$is_won <- as.factor(holdout$is_won)
+
+
+levels(logreg_predictions) <- levels(holdout$is_won)
+
+
+performance <- confusionMatrix(logreg_predictions, holdout$is_won)
+```
+
