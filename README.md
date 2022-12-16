@@ -20,3 +20,8 @@ Since the accuracy of the logistic regression was the highest, we decided to use
 •	Average player-score of the top 3 midfielders on each team
 •	Average player-score of the top rated goalkeeper on each team
 The outcomes of the group stages that the logistic regression model is show in a table below. A W or L in the Win_or_loss column indicates a win or a loss for the home team in that matchup. These predictions showed a 67% accuracy on the holdout data, which gives us confidence that the model can predict real world outcomes reasonably well for international matches.
+
+
+
+![image](https://user-images.githubusercontent.com/112140301/208023913-d99b9ef8-bf1a-4eb3-921c-4478fc0c7747.png)
+
