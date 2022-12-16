@@ -26,6 +26,7 @@ international_matches$home_team_total_fifa_points <- as.numeric(international_ma
 international_matches$away_team_total_fifa_points <- as.numeric(international_matches$away_team_total_fifa_points)
 international_matches$home_team_score <- as.numeric(international_matches$home_team_score)
 international_matches$away_team_score <- as.numeric(international_matches$away_team_score)
+international_matches$away_team_score <- as.numeric(international_matches$away_team_score)
 ```
 
 
@@ -35,9 +36,24 @@ international_matches <- international_matches %>%
          average_rank = (home_team_fifa_rank + away_team_fifa_rank) / 2,
          point_difference = home_team_total_fifa_points - away_team_total_fifa_points,
          is_stake = tournament != "Friendly",
-         is_worldcup = grepl("FIFA World Cup", tournament),
-         score_difference = home_team_score - away_team_score,
-         is_won = score_difference > 0)
+         worldcup_game = grepl("FIFA World Cup", tournament),
+         score_diff = as.numeric(home_team_score) - as.numeric(away_team_score),
+         offense_diff = as.numeric(home_team_mean_offense_score) - as.numeric(away_team_mean_offense_score),
+         defense_diff = as.numeric(home_team_mean_defense_score) - as.numeric(away_team_mean_defense_score),
+         midfield_diff = as.numeric(home_team_mean_midfield_score) - as.numeric(away_team_mean_midfield_score),
+         keeper_diff = as.numeric(home_team_goalkeeper_score) - as.numeric(away_team_goalkeeper_score),
+         win_or_loss = ifelse(score_diff > 0,"W","L") )
+
+international_matches$home_team_goalkeeper_score <- as.numeric(international_matches$home_team_goalkeeper_score)
+international_matches$away_team_goalkeeper_score <- as.numeric(international_matches$away_team_goalkeeper_score)
+international_matches$home_team_mean_defense_score <- as.numeric(international_matches$home_team_mean_defense_score)
+international_matches$away_team_mean_defense_score <- as.numeric(international_matches$away_team_mean_defense_score)
+international_matches$home_team_mean_offense_score <- as.numeric(international_matches$home_team_mean_offense_score)
+international_matches$away_team_mean_offense_score <- as.numeric(international_matches$away_team_mean_offense_score)
+international_matches$home_team_mean_midfield_score <-as.numeric(international_matches$home_team_mean_midfield_score)
+international_matches$away_team_mean_midfield_score <-as.numeric(international_matches$away_team_mean_midfield_score)
+
+international_matches <- na.omit(international_matches)
 ```
 
 
@@ -48,7 +64,7 @@ train <- international_matches[rnd < 0.7,]
 holdout <- international_matches[rnd >= 0.7,]
 
 
-logreg_model <- train(factor(is_won) ~ average_rank + rank_difference + point_difference + is_stake + is_worldcup,
+logreg_model <- train(factor(win_or_loss) ~ average_rank + rank_difference + keeper_diff + midfield_diff + offense_diff + defense_diff,
                       data = train,
                       method = "glm",
                       family = "binomial")
@@ -56,18 +72,224 @@ logreg_model <- train(factor(is_won) ~ average_rank + rank_difference + point_di
 
 logreg_predictions <- predict(logreg_model, holdout)
 
-
-
-performance <- confusionMatrix(logreg_predictions,)
-
-
+train$win_or_loss <- factor(train$win_or_loss)
 logreg_predictions <- as.factor(logreg_predictions)
-holdout$is_won <- as.factor(holdout$is_won)
+holdout$win_or_loss <- factor(holdout$win_or_loss)
+
+levels(logreg_predictions) <- levels(holdout$win_or_loss)
+levels(logreg_predictions) <- levels(train$win_or_loss)
+
+performance <- confusionMatrix(logreg_predictions, holdout$win_or_loss)
+
+```
+
+```{r}
+library(rpart)
+library(ggplot2)
+library(arules)
+library(rpart.plot)
+
+dt_model <- rpart(factor(win_or_loss) ~ rank_difference  
+                                      + keeper_diff 
+                                      + midfield_diff 
+                                      + offense_diff 
+                                      + defense_diff 
+                                      + average_rank,
+                          data = train,
+                          method = "class",
+                          control = list(minsplit = 100,
+                                         cp =.0015985,
+                                         minbucket = 100))
 
 
-levels(logreg_predictions) <- levels(holdout$is_won)
+rpart.plot(dt_model)
+
+summary(dt_model)
 
 
-performance <- confusionMatrix(logreg_predictions, holdout$is_won)
+#Checking Training Accuracy
+t_pred = predict(dt_model,holdout,type="class")
+t = holdout$win_or_loss
+accuracy = sum(t_pred == t)/length(t)
+print(accuracy)
+
+#Checking Holdout Accuracy to see if Overfit
+t_pred = predict(dt_model,train,type="class")
+t = train$win_or_loss
+accuracy1 = sum(t_pred == t)/length(t)
+print(accuracy1)
+
+```
+
+**Adding the Average of the last 5 years stats to the teams DF**
+```{r}
+team_names <- unique(international_matches$home_team)
+# Create an empty data frame to store the results
+results_df <- data.frame()
+
+# Loop through each team in the team_names list
+for (team in team_names){
+  # Filter the data to include only rows where the home_team is equal to the current team
+  filtered_data <- filter(international_matches, home_team == team)
+  
+  # Summarize the filtered data by calculating the mean of each relevant column
+  summarized_data <- filtered_data %>% 
+                     group_by(home_team) %>% 
+                     summarize(
+                               home_team_mean_midfield_score = mean(home_team_mean_midfield_score),
+                               home_team_mean_defense_score = mean(home_team_mean_defense_score),
+                               home_team_goalkeeper_score = mean(home_team_goalkeeper_score),
+                               home_team_mean_offense_score = mean(home_team_mean_offense_score))
+  
+  # Use bind_rows() to add the summarized data to the results data frame
+  results_df <- bind_rows(results_df, summarized_data)
+}
+
+
+  
+# For loop to grab ranks for every team from 2022 rankings
+
+countries <- results_df$home_team
+for (i in 1:length(countries)) {
+  # Pull the rank for the current country
+  results_df$rank[i] <- rankings %>%
+    filter(year(rank_date) == 2022, country_full == countries[i]) %>%
+    head(1) %>% summarise(as.numeric(rank))
+}
+
+
+# Renaming Columns in results_df
+
+colnames(results_df) <- c( "Country","Midfield_score", "Defense_score" ,"Goalkeeper_score",   
+"Offense_score" , "rank")
+
+
+```
+
+**Implementing the Schedule**
+```{r}
+schedule <- read.csv("schedule.csv")
+
+#Pulling the data
+home_teams <- unique(international_matches$home_team)
+for (team in home_teams){
+schedule$Home_Offense[schedule$Home == team] <- results_df$Offense_score[results_df$Country == team]
+schedule$Home_Defense[schedule$Home == team] <- results_df$Defense_score[results_df$Country == team]
+schedule$Home_Midfield[schedule$Home == team] <- results_df$Midfield_score[results_df$Country == team]
+schedule$Home_Keeper[schedule$Home == team] <- results_df$Goalkeeper_score[results_df$Country == team]
+}
+
+
+away_teams <- unique(international_matches$away_team)
+for (team in away_teams){
+schedule$Away_Offense[schedule$Away == team] <- results_df$Offense_score[results_df$Country == team]
+schedule$Away_Defense[schedule$Away == team] <- results_df$Defense_score[results_df$Country == team]
+schedule$Away_Midfield[schedule$Away == team] <- results_df$Midfield_score[results_df$Country == team]
+schedule$Away_Keeper[schedule$Away == team] <- results_df$Goalkeeper_score[results_df$Country == team]
+}
+```
+
+
+
+**Re-Making Features**
+```{r}
+#Away ranks
+countries <- schedule$Away
+for (i in 1:length(countries)) {
+  # Pull the rank for the current country
+  schedule$rank_away[i] <- rankings %>%
+    filter(year(rank_date) == 2022, country_full == countries[i]) %>%
+    head(1) %>% summarise(as.numeric(rank))
+}
+
+#Home Ranks
+
+countries <- schedule$Home
+for (i in 1:length(countries)) {
+  # Pull the rank for the current country
+  schedule$rank_home[i] <- rankings %>%
+    filter(year(rank_date) == 2022, country_full == countries[i]) %>%
+    head(1) %>% summarise(as.numeric(rank))
+}
+
+
+
+schedule <- schedule[1:49,] %>% 
+  mutate(rank_difference = as.numeric(rank_home) - as.numeric(rank_away),
+         average_rank = ( as.numeric(rank_home) + as.numeric(rank_away) / 2 ),
+         keeper_diff = Home_Keeper - Away_Keeper,
+         offense_diff = Home_Offense - Away_Offense,
+         defense_diff = Home_Defense - Away_Defense,
+         midfield_diff = Home_Midfield - Away_Midfield)
+
+schedule <- na.omit(schedule)
+
+
+
+for (game in 1:length(schedule)){
+      schedule$Win_or_loss[game] <- predict(logreg_model,schedule[game,])
+}
+
+schedule$Win_or_loss <- ifelse(schedule$Win_or_loss ==2,'W','L')
+
+
+```
+
+
+**Gradient Boosted Model**
+```{r}
+library(gbm)
+train$win_or_loss <- ifelse(train$win_or_loss == "W",1,0)
+# Create the gbm model
+gbm_model <- gbm(factor(win_or_loss) ~ average_rank + rank_difference + keeper_diff + midfield_diff + offense_diff + defense_diff,
+                 data = train)
+
+# Make predictions on the holdout set
+gbm_predictions <- predict(gbm_model, holdout, n.trees = 100)
+
+# Convert the predictions to a factor and set the levels to match the holdout set
+gbm_predictions <- as.factor(gbm_predictions)
+levels(gbm_predictions) <- levels(holdout$win_or_loss)
+
+# Compute the performance of the model using a confusion matrix
+performance <- confusionMatrix(gbm_predictions, holdout$win_or_loss)
+performance
+```
+**Random Forrest**
+```{r}
+library(randomForest)
+
+# Create the random forest model
+rf_model <- randomForest(factor(win_or_loss) ~ average_rank + rank_difference + keeper_diff + midfield_diff + offense_diff + defense_diff,
+                         data = train)
+
+# Make predictions on the holdout set
+rf_predictions <- predict(rf_model, holdout)
+
+# Convert the predictions to a factor and set the levels to match the holdout set
+rf_predictions <- as.factor(rf_predictions)
+levels(rf_predictions) <- levels(holdout$win_or_loss)
+
+
+performance <- confusionMatrix(rf_predictions, holdout$win_or_loss)
+performance
+```
+**Naive Bayers**
+```{r}
+library(e1071)
+
+
+nb_model <- naiveBayes(factor(win_or_loss) ~ average_rank + rank_difference + keeper_diff + midfield_diff + offense_diff + defense_diff,
+                       data = train)
+
+
+nb_predictions <- predict(nb_model, holdout)
+
+
+nb_predictions <- as.factor(nb_predictions)
+levels(nb_predictions) <- levels(factor(holdout$win_or_loss))
+
+
+performance <- confusionMatrix(nb_predictions, train$win_or_loss)
 ```
 
